@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uno Momento — The Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700;800;900&family=Heebo:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --ink:#0b0b0c;--paper:#f4f2ec;--paper2:#eae8e1;
+    --violet:#7c3aed;--violet-bright:#a855f7;--violet-glow:rgba(124,58,237,.16);
+    --spring:cubic-bezier(0.34,1.56,0.64,1);
+    --smooth:cubic-bezier(0.65,0,0.35,1);
+    --ease:cubic-bezier(0.22,1,0.36,1);
+  }
+  html,body{height:100%;background:var(--ink);color:var(--paper);font-family:'Archivo',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+
+  .studio{display:grid;grid-template-columns:1fr 460px;height:100vh}
+
+  /* ── LEFT: live shirt preview (REAL mock engine) ── */
+  .preview{position:relative;background:#101012;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .preview__bg{position:absolute;inset:0;background:radial-gradient(ellipse at 45% 55%,rgba(124,58,237,.10) 0%,transparent 62%)}
+
+  /* the stage holds the garment image + the print canvas, in one coord space */
+  .stage{position:relative;width:min(560px,72vh);aspect-ratio:1;flex:none;transition:transform .5s var(--ease)}
+  .stage__gar{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+    filter:drop-shadow(0 40px 90px rgba(0,0,0,.6));user-select:none;-webkit-user-drag:none}
+  /* print canvas — placed by JS exactly over the garment's print zone */
+  .stage__print{position:absolute;cursor:grab;touch-action:none}
+  .stage__print:active{cursor:grabbing}
+  /* empty-state hint sits on the chest until a photo is chosen */
+  .stage__hint{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:6px;border:1.5px dashed rgba(244,242,236,.28);border-radius:4px;pointer-events:none;
+    background:rgba(244,242,236,.03);transition:opacity .4s}
+  .stage__hint span{font-family:'Archivo';font-size:10px;font-weight:800;letter-spacing:.2em;
+    text-transform:uppercase;color:rgba(244,242,236,.42);text-align:center;line-height:1.7}
+  .stage__hint svg{width:22px;height:22px;stroke:rgba(244,242,236,.4);fill:none;stroke-width:1.5}
+
+  /* drag-over overlay */
+  .drop-zone{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:14px;background:rgba(11,11,12,.74);backdrop-filter:blur(6px);
+    opacity:0;pointer-events:none;transition:opacity .25s}
+  .drop-zone.active{opacity:1;pointer-events:auto}
+  .drop-zone__ring{width:120px;height:120px;border-radius:50%;border:2px solid var(--violet-bright);
+    display:flex;align-items:center;justify-content:center;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(168,85,247,.4)}50%{box-shadow:0 0 0 18px rgba(168,85,247,0)}}
+  .drop-zone__ring svg{width:36px;height:36px;stroke:var(--violet-bright);fill:none;stroke-width:1.5}
+  .drop-zone__label{font-weight:700;font-size:13px;letter-spacing:.18em;text-transform:uppercase}
+
+  /* colour swatches — ALWAYS visible (fix for the real studio's paint-after-upload bug) */
+  .colour-row{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);
+    display:flex;gap:11px;align-items:center;z-index:5;padding:10px 16px;
+    background:rgba(11,11,12,.5);backdrop-filter:blur(8px);border-radius:40px;border:1px solid rgba(244,242,236,.1)}
+  .swatch{width:24px;height:24px;border-radius:50%;cursor:pointer;position:relative;
+    border:2px solid rgba(244,242,236,.25);transition:transform .3s var(--spring),border-color .2s}
+  .swatch.active{transform:scale(1.22);border-color:var(--paper)}
+  .swatch:hover{transform:scale(1.22)}
+  .swatch::after{content:attr(data-name);position:absolute;bottom:130%;left:50%;transform:translateX(-50%);
+    font-size:8.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--paper);
+    white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none}
+  .swatch:hover::after{opacity:.9}
+
+  /* view toggle (front / back) */
+  .view-row{position:absolute;top:26px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:4px;
+    background:rgba(11,11,12,.5);backdrop-filter:blur(8px);border-radius:30px;padding:4px;border:1px solid rgba(244,242,236,.1)}
+  .view-btn{padding:7px 18px;border-radius:30px;font-size:10px;font-weight:800;letter-spacing:.16em;
+    text-transform:uppercase;color:rgba(244,242,236,.6);background:none;transition:background .2s,color .2s}
+  .view-btn.active{background:var(--paper);color:var(--ink)}
+
+  /* ── RIGHT: controls panel ── */
+  .panel{background:var(--paper);color:var(--ink);display:flex;flex-direction:column;overflow-y:auto;
+    border-left:1px solid rgba(11,11,12,.1)}
+  .panel__nav{display:flex;align-items:center;justify-content:space-between;
+    padding:22px 30px 18px;border-bottom:1px solid rgba(11,11,12,.1);flex:none}
+  .nav__back{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink);text-decoration:none;opacity:.55;transition:opacity .2s}
+  .nav__back:hover{opacity:1}
+  .nav__back svg{width:16px;height:8px;stroke:currentColor;fill:none;stroke-width:1.8}
+  .nav__logo{font-family:'Anton';font-size:15px;letter-spacing:.32em;text-transform:uppercase}
+  .nav__step{font-size:10.5px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;opacity:.4}
+
+  .panel__section{padding:26px 30px;border-bottom:1px solid rgba(11,11,12,.08)}
+  .section__label{font-size:10px;font-weight:800;letter-spacing:.26em;text-transform:uppercase;opacity:.4;margin-bottom:15px}
+
+  /* upload */
+  .upload-area{border:1.5px dashed rgba(11,11,12,.2);border-radius:6px;padding:26px 20px;text-align:center;
+    cursor:pointer;transition:border-color .25s,background .25s;position:relative}
+  .upload-area:hover,.upload-area.drag{border-color:var(--violet);background:var(--violet-glow)}
+  .upload-area input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .upload-icon{width:40px;height:40px;margin:0 auto 12px;border:1.5px solid rgba(11,11,12,.2);border-radius:50%;
+    display:flex;align-items:center;justify-content:center}
+  .upload-icon svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:1.5;opacity:.5}
+  .upload-area h3{font-size:14px;font-weight:800;margin-bottom:5px}
+  .upload-area p{font-size:11.5px;opacity:.5;line-height:1.6}
+  .upload-area p strong{font-weight:700;opacity:1;color:var(--violet)}
+  .upload-area .thumb{display:none;width:64px;height:64px;border-radius:6px;object-fit:cover;margin:0 auto 4px}
+  .upload-area.has-photo .thumb{display:block}
+  .upload-area.has-photo .upload-icon,.upload-area.has-photo h3{display:none}
+  .upload-area.has-photo p{opacity:.7}
+  .upload-area.has-photo p strong{color:var(--violet)}
+  .lowres-warn{display:none;margin-top:10px;font-size:11px;font-weight:700;color:#b45309;
+    background:rgba(180,83,9,.08);border-radius:4px;padding:8px 10px;letter-spacing:.02em}
+  .lowres-warn.on{display:block}
+
+  /* adjust row (scale/rotate) — only when photo present */
+  .adjust{display:none;gap:18px;margin-top:16px}
+  .adjust.on{display:flex}
+  .adjust__col{flex:1}
+  .adjust__col label{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;opacity:.4;display:block;margin-bottom:8px}
+  .adjust input[type=range]{width:100%;accent-color:var(--violet)}
+
+  /* fit style pills */
+  .fit-row{display:flex;gap:8px;margin-top:4px}
+  .fit-btn{flex:1;border:1.5px solid rgba(11,11,12,.15);border-radius:4px;padding:10px 6px;text-align:center;
+    background:none;color:var(--ink);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:capitalize;
+    transition:border-color .2s,background .2s}
+  .fit-btn:hover{border-color:var(--ink)}
+  .fit-btn.active{border-color:var(--violet);background:var(--violet-glow)}
+
+  /* print size */
+  .print-size-row{display:flex;gap:10px}
+  .ps-btn{flex:1;border:1.5px solid rgba(11,11,12,.15);border-radius:4px;padding:12px 8px;text-align:center;
+    background:none;color:var(--ink);transition:border-color .2s,background .2s}
+  .ps-btn:hover{border-color:var(--ink)}
+  .ps-btn.active{border-color:var(--violet);background:var(--violet-glow)}
+  .ps-btn strong{display:block;font-size:13px;font-weight:800;margin-bottom:3px}
+  .ps-btn span{font-size:10.5px;opacity:.5}
+
+  /* shirt size */
+  .size-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .size-btn{border:1.5px solid rgba(11,11,12,.18);border-radius:4px;padding:10px 4px;font-size:13px;
+    font-weight:800;text-align:center;background:none;color:var(--ink);transition:border-color .2s,background .2s,color .2s}
+  .size-btn:hover{border-color:var(--ink)}
+  .size-btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .size-guide{font-size:11px;opacity:.45;margin-top:10px}
+
+  /* qty */
+  .qty-row{display:flex;align-items:center;gap:16px}
+  .qty-btn{width:36px;height:36px;border-radius:50%;border:1.5px solid rgba(11,11,12,.2);background:none;
+    font-size:18px;font-weight:300;display:flex;align-items:center;justify-content:center;color:var(--ink);
+    transition:border-color .2s,background .2s}
+  .qty-btn:hover{border-color:var(--ink);background:rgba(11,11,12,.06)}
+  .qty-val{font-size:16px;font-weight:800;min-width:24px;text-align:center}
+
+  /* CTA */
+  .panel__cta{padding:22px 30px;flex:none;background:var(--paper);border-top:1px solid rgba(11,11,12,.08)}
+  .price-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+  .price-label{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;opacity:.45}
+  .price-val{font-family:'Anton';font-size:28px}
+  .price-note{font-size:11px;opacity:.4;margin-top:2px}
+  .order-btn{width:100%;padding:17px;background:var(--ink);color:var(--paper);border-radius:4px;
+    font-weight:900;font-size:14px;letter-spacing:.18em;text-transform:uppercase;
+    display:flex;align-items:center;justify-content:center;gap:14px;
+    transition:background .25s,gap .25s,transform .2s var(--spring)}
+  .order-btn:hover{background:#1a1a1a;gap:22px;transform:translateY(-1px)}
+  .order-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  .order-btn svg{width:22px;height:10px;stroke:currentColor;fill:none;stroke-width:1.7}
+  .order-note{font-size:10.5px;text-align:center;opacity:.4;margin-top:11px;line-height:1.6}
+
+  .panel__section,.panel__cta{opacity:0;transform:translateY(14px);animation:panelIn .7s var(--ease) forwards}
+  .panel__section:nth-child(2){animation-delay:.06s}
+  .panel__section:nth-child(3){animation-delay:.12s}
+  .panel__section:nth-child(4){animation-delay:.18s}
+  .panel__section:nth-child(5){animation-delay:.24s}
+  .panel__cta{animation-delay:.3s}
+  @keyframes panelIn{to{opacity:1;transform:none}}
+
+  .panel::-webkit-scrollbar{width:4px}
+  .panel::-webkit-scrollbar-thumb{background:rgba(11,11,12,.15);border-radius:2px}
+
+  @media(max-width:900px){
+    .studio{grid-template-columns:1fr;grid-template-rows:50vh 1fr;height:auto;overflow:visible}
+    html,body{overflow:auto}
+    .preview{min-height:50vh}.panel{overflow:visible}
+  }
+</style>
+</head>
+<body>
+
+<div class="studio">
+
+  <!-- ════ LEFT: REAL photoreal preview ════ -->
+  <div class="preview" id="preview">
+    <div class="preview__bg"></div>
+
+    <div class="view-row">
+      <button class="view-btn active" data-view="front">Front</button>
+      <button class="view-btn" data-view="back">Back</button>
+    </div>
+
+    <div class="stage" id="stage">
+      <img class="stage__gar" id="gar" src="img/mock/black-base.webp" alt="Shirt preview" width="1200" height="1200">
+      <canvas class="stage__print" id="print" width="10" height="10"></canvas>
+      <div class="stage__hint" id="hint">
+        <svg viewBox="0 0 24 24"><path d="M12 16V8m0 0-3 3m3-3 3 3M5 20h14"/></svg>
+        <span>Your<br>moment<br>here</span>
+      </div>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone__ring"><svg viewBox="0 0 24 24"><path d="M12 16V8m0 0-3 3m3-3 3 3"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
+      <div class="drop-zone__label">Drop your photo</div>
+    </div>
+
+    <div class="colour-row" id="colourRow"><!-- swatches injected, always visible --></div>
+  </div>
+
+  <!-- ════ RIGHT: controls ════ -->
+  <div class="panel">
+    <div class="panel__nav">
+      <a href="index.html" class="nav__back"><svg viewBox="0 0 16 8"><path d="M16 4H0M5 1L0 4l5 3"/></svg>Back</a>
+      <div class="nav__logo">Uno Momento</div>
+      <div class="nav__step">Studio</div>
+    </div>
+
+    <!-- 1. Upload -->
+    <div class="panel__section">
+      <div class="section__label">Your moment</div>
+      <div class="upload-area" id="uploadArea">
+        <input type="file" accept="image/*" id="fileInput">
+        <img class="thumb" id="thumbImg" alt="">
+        <div class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V8m0 0-3 3m3-3 3 3M5 20h14"/></svg></div>
+        <h3>Upload your photo</h3>
+        <p>Drag &amp; drop or <strong>tap to browse</strong><br>JPG, PNG, HEIC · up to 40 MB</p>
+      </div>
+      <div class="lowres-warn" id="lowres">⚠ This photo is a little low-res — it'll still print, but a sharper photo looks best.</div>
+
+      <div class="adjust" id="adjust">
+        <div class="adjust__col"><label>Size</label><input type="range" id="scale" min="0.35" max="1.0" step="0.01" value="0.70"></div>
+        <div class="adjust__col"><label>Rotate</label><input type="range" id="rot" min="-15" max="15" step="1" value="0"></div>
+      </div>
+    </div>
+
+    <!-- 2. Print style -->
+    <div class="panel__section">
+      <div class="section__label">Print style</div>
+      <div class="fit-row">
+        <button class="fit-btn active" data-fit="torn">Torn</button>
+        <button class="fit-btn" data-fit="square">Square</button>
+        <button class="fit-btn" data-fit="circle">Circle</button>
+      </div>
+    </div>
+
+    <!-- 3. Shirt size -->
+    <div class="panel__section">
+      <div class="section__label">Shirt size</div>
+      <div class="size-grid">
+        <button class="size-btn" data-sz="XS">XS</button>
+        <button class="size-btn active" data-sz="S">S</button>
+        <button class="size-btn" data-sz="M">M</button>
+        <button class="size-btn" data-sz="L">L</button>
+        <button class="size-btn" data-sz="XL">XL</button>
+      </div>
+      <div class="size-guide">Not sure? → <u style="cursor:pointer">Size guide</u></div>
+    </div>
+
+    <!-- 4. Quantity -->
+    <div class="panel__section">
+      <div class="section__label">Quantity</div>
+      <div class="qty-row">
+        <button class="qty-btn" id="qtyMinus">−</button>
+        <div class="qty-val" id="qtyVal">1</div>
+        <button class="qty-btn" id="qtyPlus">+</button>
+        <span style="font-size:11px;opacity:.4;margin-left:4px">· 3+ get 10% off</span>
+      </div>
+    </div>
+
+    <div class="panel__cta">
+      <div class="price-row">
+        <div><div class="price-label">Total</div><div class="price-note">incl. print · free delivery</div></div>
+        <div class="price-val" id="priceVal">₪169</div>
+      </div>
+      <button class="order-btn" id="orderBtn" disabled>
+        Add your photo first
+        <svg viewBox="0 0 22 10"><path d="M0 5h20M16 1l4 4-4 4"/></svg>
+      </button>
+      <div class="order-note">Made in Israel · Ships within 5–7 days · 100% cotton · DTG print</div>
+    </div>
+  </div>
+</div>
+
+<script src="mock.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const BASE_PRICE=169;
+
+// garment colourways (subset of the real engine's 9)
+const GARMENTS=[
+  {key:'cream', name:'Cream', css:'#e9e4d6'},
+  {key:'black', name:'Black', css:'#1a1a1a'},
+  {key:'olive', name:'Olive', css:'#5c5c3a'},
+  {key:'slate', name:'Slate', css:'#4a5158'},
+  {key:'brown', name:'Sand', css:'#8a6b4a'},
+];
+
+// print state passed to the real engine
+let D={file:null,cx:.5,cy:.5,scale:.70,rot:0,fit:'torn',orient:'free',garment:'black'};
+let ART=null, META=null, ZONE=null, VIEW='front', qty=1, hasPhoto=false;
+
+const stage=$('stage'), gar=$('gar'), cv=$('print'), hint=$('hint');
+
+// ── position the print canvas exactly over the garment's zone ──
+async function fitCanvas(){
+  if(!META) META=await Mock.meta();
+  ZONE=(META.zones && META.zones[D.garment]) || META.zone;
+  const r=stage.getBoundingClientRect();
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  // place canvas + hint over the zone
+  [cv,hint].forEach(el=>{
+    el.style.left=(ZONE.x*r.width)+'px'; el.style.top=(ZONE.y*r.height)+'px';
+    el.style.width=(ZONE.w*r.width)+'px'; el.style.height=(ZONE.h*r.height)+'px';
+  });
+  const pw=Math.max(8,Math.round(ZONE.w*r.width*dpr)), ph=Math.max(8,Math.round(ZONE.h*r.height*dpr));
+  if(cv.width!==pw||cv.height!==ph){cv.width=pw;cv.height=ph;}
+}
+
+// ── render the print via the REAL engine ──
+async function paint(){
+  await fitCanvas();
+  if(!ART){ cv.getContext('2d').clearRect(0,0,cv.width,cv.height); return; }
+  try{ await Mock.render(cv, ART, D.garment, D); }catch(e){ console.warn('render',e); }
+}
+
+// ── swatches (ALWAYS visible — fixes the real studio's paint-after-upload bug) ──
+function buildSwatches(){
+  $('colourRow').innerHTML='';
+  GARMENTS.forEach(g=>{
+    const s=document.createElement('div');
+    s.className='swatch'+(g.key===D.garment?' active':'');
+    s.style.background=g.css; s.dataset.name=g.name; s.dataset.key=g.key;
+    s.addEventListener('click',async()=>{
+      document.querySelectorAll('.swatch').forEach(x=>x.classList.remove('active'));
+      s.classList.add('active');
+      D.garment=g.key;
+      gar.src='img/mock/'+g.key+(VIEW==='back'?'-back':'')+'-base.webp';
+      await paint();
+    });
+    $('colourRow').appendChild(s);
+  });
+}
+
+// ── view toggle ──
+document.querySelectorAll('.view-btn').forEach(b=>b.addEventListener('click',async()=>{
+  document.querySelectorAll('.view-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); VIEW=b.dataset.view;
+  gar.src='img/mock/'+D.garment+(VIEW==='back'?'-back':'')+'-base.webp';
+  // back has no photo print (front only)
+  cv.style.display = VIEW==='back' ? 'none':'block';
+  hint.style.display = (VIEW==='back'||hasPhoto) ? 'none':'flex';
+  if(VIEW==='front') await paint();
+}));
+
+// ── upload ──
+function loadPhoto(src){
+  const img=new Image();
+  img.onload=async()=>{
+    ART=img; hasPhoto=true;
+    hint.style.display='none';
+    $('uploadArea').classList.add('has-photo');
+    $('thumbImg').src=src;
+    $('uploadArea').querySelector('p').innerHTML='<strong>✓ Photo added</strong> · tap to change';
+    $('adjust').classList.add('on');
+    $('orderBtn').disabled=false;
+    $('orderBtn').childNodes[0].textContent='Place my order ';
+    // low-res warning (real print needs ~800px+)
+    $('lowres').classList.toggle('on', Math.min(img.naturalWidth,img.naturalHeight)<800);
+    await paint();
+  };
+  img.src=src;
+}
+$('fileInput').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader(); r.onload=ev=>loadPhoto(ev.target.result); r.readAsDataURL(f);
+});
+
+// ── drag & drop ──
+const preview=$('preview'), dz=$('dropZone');
+['dragenter','dragover'].forEach(ev=>preview.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('active');}));
+['dragleave','drop'].forEach(ev=>preview.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('active');}));
+preview.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0]; if(!f||!f.type.startsWith('image/'))return;
+  const r=new FileReader(); r.onload=ev=>loadPhoto(ev.target.result); r.readAsDataURL(f);
+});
+const ua=$('uploadArea');
+['dragenter','dragover'].forEach(ev=>ua.addEventListener(ev,e=>{e.preventDefault();ua.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>ua.addEventListener(ev,()=>ua.classList.remove('drag')));
+
+// ── adjust sliders ──
+$('scale').addEventListener('input',e=>{D.scale=parseFloat(e.target.value);paint();});
+$('rot').addEventListener('input',e=>{D.rot=parseFloat(e.target.value);paint();});
+
+// ── drag the print on the shirt ──
+let dragging=false;
+cv.addEventListener('pointerdown',e=>{if(!ART)return;dragging=true;cv.setPointerCapture(e.pointerId);});
+cv.addEventListener('pointermove',e=>{
+  if(!dragging||!ART)return;
+  const r=cv.getBoundingClientRect();
+  D.cx=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+  D.cy=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+  paint();
+});
+cv.addEventListener('pointerup',()=>dragging=false);
+
+// ── fit style ──
+document.querySelectorAll('.fit-btn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.fit-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); D.fit=b.dataset.fit; paint();
+}));
+
+// ── shirt size ──
+document.querySelectorAll('.size-btn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.size-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
+// ── qty + price ──
+function price(){$('priceVal').textContent='₪'+BASE_PRICE*qty;}
+$('qtyMinus').addEventListener('click',()=>{if(qty>1){qty--;$('qtyVal').textContent=qty;price();}});
+$('qtyPlus').addEventListener('click',()=>{qty++;$('qtyVal').textContent=qty;price();});
+
+// ── init ──
+buildSwatches();
+window.addEventListener('resize',()=>{ if(ART) paint(); else fitCanvas(); });
+gar.addEventListener('load',()=>{ if(!hasPhoto) fitCanvas(); });
+fitCanvas();
+price();
+</script>
+</body>
+</html>
